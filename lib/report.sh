@@ -36,13 +36,10 @@ EOF
 }
 
 sweep_display_path() {
-  local path display tilde
-  path=$1
-  tilde=$(printf '\176')
-  case "$path" in
-    "$HOME"/*) display="${tilde}/${path#"$HOME"/}" ;;
-    "$HOME") display=$tilde ;;
-    *) display=$path ;;
+  local display=$1
+  # shellcheck disable=SC2088 # a literal ~ is the point: it is for display
+  case "$display" in
+    "$HOME"/*) display="~/${display#"$HOME"/}" ;;
   esac
   if [ "${#display}" -gt 44 ]; then
     display="${display:0:43}…"
@@ -50,104 +47,69 @@ sweep_display_path() {
   printf '%s\n' "$display"
 }
 
+# Appends one row to the caller's report state (rows, total, skipped) for
+# the category in $label/$running. rc is sweep_size_kb's status: 3 means
+# part of it is unreadable. Rows sort by kb; -1 sorts them last.
+sweep_report_add_row() {
+  local location=$1 kb=$2 rc=$3 size sort_kb
+  if [ "$rc" -eq 3 ]; then
+    size='no access'
+    sort_kb=-1
+  else
+    size=$(sweep_human "$kb")
+    sort_kb=$kb
+  fi
+  if [ "$running" -eq 1 ]; then
+    sort_kb=-1
+    case ", $skipped," in
+      *", $label,"*) ;;
+      *) skipped="${skipped:+$skipped, }$label" ;;
+    esac
+  elif [ "$rc" -eq 0 ]; then
+    total=$((total + kb))
+  fi
+  rows="$rows$sort_kb|$label|$location|$size
+"
+}
+
 sweep_report() {
-  local rows skipped total newline id label proc paths path size_kb size_status size_display numeric running display tilde path_index
-  local -a path_array
-  rows=
-  skipped=
-  total=0
-  tilde=$(printf '\176')
-  newline='
-'
+  local rows='' skipped='' total=0
+  local id label proc running paths path kb rc line
 
   while IFS= read -r id; do
-    label=$(sweep_category_field "$id" label) || continue
-    proc=$(sweep_category_field "$id" proc) || proc=
+    label=$(sweep_category_field "$id" label)
+    proc=$(sweep_category_field "$id" proc)
     running=0
     if [ -n "$proc" ] && sweep_is_running "$proc"; then
       running=1
-      if [ -z "$skipped" ]; then
-        skipped=$label
-      else
-        skipped="$skipped, $label"
-      fi
     fi
 
-    if [ "$id" = library ]; then
-      paths=$(sweep_library_other_paths)
-      [ -n "$paths" ] || continue
-      path_index=0
-      while IFS= read -r path; do
-        [ -n "$path" ] || continue
-        path_array[path_index]=$path
-        path_index=$((path_index + 1))
-      done <<EOF
+    case "$id" in
+      docker)
+        kb=$(sweep_category_size_kb docker)
+        if [ "$kb" -gt 0 ]; then
+          sweep_report_add_row 'Docker build cache' "$kb" 0
+        fi
+        ;;
+      library)
+        paths=$(sweep_library_other_paths)
+        if [ -n "$paths" ]; then
+          kb=$(sweep_size_kb_lines "$paths") && rc=0 || rc=$?
+          # shellcheck disable=SC2088 # display text, not a path
+          sweep_report_add_row "~/Library/Caches (other)" "$kb" "$rc"
+        fi
+        ;;
+      *)
+        paths=$(sweep_category_field "$id" paths)
+        while IFS= read -r path; do
+          [ -e "$path" ] || [ -L "$path" ] || continue
+          kb=$(sweep_size_kb "$path") && rc=0 || rc=$?
+          sweep_report_add_row "$(sweep_display_path "$path")" "$kb" "$rc"
+        done <<EOF
 $paths
 EOF
-      if size_kb=$(sweep_size_kb "${path_array[@]}"); then
-        size_display=$(sweep_human "$size_kb")
-        numeric=$size_kb
-        if [ "$running" -eq 0 ]; then
-          total=$((total + size_kb))
-        fi
-      else
-        size_status=$?
-        if [ "$size_status" -eq 3 ]; then
-          size_display='no access'
-          numeric=-1
-        else
-          continue
-        fi
-      fi
-      if [ "$running" -eq 1 ]; then
-        numeric=-1
-      fi
-      display="${tilde}/Library/Caches (other)"
-      rows="${rows}${numeric}|${label}|${display}|${size_display}|${running}${newline}"
-      continue
-    fi
-
-    paths=$(sweep_category_field "$id" paths) || continue
-    if [ "$id" = docker ]; then
-      size_kb=$(sweep_category_size_kb "$id") || size_kb=0
-      [ "$size_kb" -gt 0 ] || continue
-      size_display=$(sweep_human "$size_kb")
-      numeric=$size_kb
-      if [ "$running" -eq 0 ]; then
-        total=$((total + size_kb))
-      else
-        numeric=-1
-      fi
-      rows="${rows}${numeric}|${label}|Docker build cache|${size_display}|${running}${newline}"
-      continue
-    fi
-
-    [ -n "$paths" ] || continue
-    while IFS= read -r path; do
-      [ -n "$path" ] || continue
-      [ -e "$path" ] || [ -L "$path" ] || continue
-      if size_kb=$(sweep_size_kb "$path"); then
-        size_display=$(sweep_human "$size_kb")
-        numeric=$size_kb
-        if [ "$running" -eq 0 ]; then
-          total=$((total + size_kb))
-        else
-          numeric=-1
-        fi
-      else
-        size_status=$?
-        if [ "$size_status" -eq 3 ]; then
-          size_display='no access'
-          numeric=-1
-        else
-          continue
-        fi
-      fi
-      display=$(sweep_display_path "$path")
-      rows="${rows}${numeric}|${label}|${display}|${size_display}|${running}${newline}"
-    done <<EOF
-$paths
-EOF
+        ;;
+    esac
   done <<EOF
 $(sweep_category_ids)
 EOF
@@ -157,12 +119,13 @@ EOF
     return 0
   fi
 
+  line='──────────────────────────────────────────────────────────────────────'
   printf '  %-20s %-44s %s\n' CATEGORY LOCATION SIZE
-  printf '  %s\n' '──────────────────────────────────────────────────────────────────────'
-  printf '%s' "$rows" | sort -t '|' -k1,1nr | while IFS='|' read -r _row_kb row_label row_location row_size _row_running; do
-    printf '  %-20s %-44s %s\n' "$row_label" "$row_location" "$row_size"
+  printf '  %s\n' "$line"
+  printf '%s' "$rows" | sort -t '|' -k1,1nr | while IFS='|' read -r _ label path kb; do
+    printf '  %-20s %-44s %s\n' "$label" "$path" "$kb"
   done
-  printf '  %s\n' '──────────────────────────────────────────────────────────────────────'
+  printf '  %s\n' "$line"
   printf '  %-65s %s\n' 'Reclaimable' "$(sweep_human "$total")"
   if [ -n "$skipped" ]; then
     printf '  Skipped (running): %s\n' "$skipped"

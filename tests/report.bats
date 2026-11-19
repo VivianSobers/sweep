@@ -60,3 +60,12 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" =~ Other\ caches.*Library/Caches.*other ]]
 }
+
+@test "report: skipped line names only running apps with caches" {
+  make_cache "Library/Application Support/Slack/Cache" 10
+  printf '%s\n%s\n' '/Slack.app/' '/Google Chrome.app/Contents/MacOS/Google Chrome' > "$STUB_RUNNING_FILE"
+  run "$SWEEP"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Skipped (running): Slack"* ]]
+  [[ "$output" != *"Chrome"* ]]
+}
