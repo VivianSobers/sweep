@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_path=$0
+while [ -L "$script_path" ]; do
+  script_dir=$(cd -P "$(dirname "$script_path")" >/dev/null 2>&1 && pwd -P)
+  link_target=$(readlink "$script_path")
+  case "$link_target" in
+    /*) script_path=$link_target ;;
+    *) script_path="$script_dir/$link_target" ;;
+  esac
+done
+script_dir=$(cd -P "$(dirname "$script_path")" >/dev/null 2>&1 && pwd -P)
+repo_dir=$(cd -P "$script_dir/.." >/dev/null 2>&1 && pwd -P)
+
+. "$repo_dir/lib/safety.sh"
+. "$repo_dir/lib/size.sh"
+. "$repo_dir/lib/registry.sh"
+. "$repo_dir/lib/report.sh"
+
+sweep_require_user || exit 1
+
+if [ "$#" -eq 0 ]; then
+  sweep_report
+  exit $?
+fi
+
+printf 'sweep: unknown command: %s\n' "$1" >&2
+exit 2
