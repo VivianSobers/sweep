@@ -1,0 +1,17 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install test tools
+        run: brew install bats-core shellcheck
+      - name: Run shellcheck
+        run: shellcheck bin/sweep lib/*.sh
+      - name: Run bats
+        run: bats tests
