@@ -17,6 +17,7 @@ repo_dir=$(cd -P "$script_dir/.." >/dev/null 2>&1 && pwd -P)
 . "$repo_dir/lib/size.sh"
 . "$repo_dir/lib/registry.sh"
 . "$repo_dir/lib/report.sh"
+. "$repo_dir/lib/clean.sh"
 
 sweep_require_user || exit 1
 
@@ -75,8 +76,9 @@ EOF
     exit 0
     ;;
   clean)
-    printf '%s\n' 'sweep: clean is not available yet' >&2
-    exit 2
+    shift
+    sweep_clean "$@"
+    exit $?
     ;;
   *)
     printf 'sweep: unknown command: %s\n' "$1" >&2
