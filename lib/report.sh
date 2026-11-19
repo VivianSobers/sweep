@@ -22,6 +22,11 @@ sweep_library_other_paths() {
 
   for child in "$cache_root"/*; do
     [ -e "$child" ] || [ -L "$child" ] || continue
+    # Folders macOS protects (Full Disk Access) are not candidates.
+    [ -r "$child" ] || continue
+    if [ -d "$child" ] && [ ! -x "$child" ]; then
+      continue
+    fi
     case "$known" in
       *"$nl$child$nl"*) continue ;;
     esac

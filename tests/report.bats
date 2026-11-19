@@ -69,3 +69,13 @@ teardown() {
   [[ "$output" == *"Skipped (running): Slack"* ]]
   [[ "$output" != *"Chrome"* ]]
 }
+
+@test "report: other caches counts only readable folders" {
+  make_cache Library/Caches/com.example.open 64
+  make_cache Library/Caches/com.example.locked 8
+  chmod 000 "$HOME/Library/Caches/com.example.locked"
+  run "$SWEEP"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ Other\ caches\ .*64K ]]
+  [[ "$output" != *"no access"* ]]
+}
