@@ -145,15 +145,11 @@ sweep_clean() {
     tool_cmd=$(sweep_category_field "$id" tool)
     paths=$(sweep_clean_paths "$id")
 
-    if [ -n "$proc" ] && sweep_is_running "$proc"; then
-      printf 'skip  %s (running)\n' "$label"
-      continue
-    fi
-
+    # Unreadable caches (Safari without Full Disk Access) are a skip, not a
+    # failure: nothing went wrong, sweep just can't see them.
     before_kb=$(sweep_clean_measure "$id") && rc=0 || rc=$?
     if [ "$rc" -eq 3 ]; then
       printf 'skip  %s (no access)\n' "$label"
-      failed=1
       continue
     elif [ "$rc" -ne 0 ]; then
       printf 'fail  %s: could not measure cache size\n' "$label"
@@ -161,14 +157,22 @@ sweep_clean() {
       continue
     fi
 
+    # With --all, categories the user doesn't have are skipped silently.
+    if [ "$before_kb" -eq 0 ] && ! sweep_clean_has_live_symlink "$paths"; then
+      if [ "$all" -eq 0 ]; then
+        printf 'skip  %s (empty)\n' "$label"
+      fi
+      continue
+    fi
+
+    if [ -n "$proc" ] && sweep_is_running "$proc"; then
+      printf 'skip  %s (running)\n' "$label"
+      continue
+    fi
+
     tool_present=0
     if sweep_clean_tool_present "$tool_cmd"; then
       tool_present=1
-    fi
-    if [ "$before_kb" -eq 0 ] && { [ "$mode" != tool ] || [ "$tool_present" -eq 0 ]; } &&
-      ! sweep_clean_has_live_symlink "$paths"; then
-      printf 'skip  %s (empty)\n' "$label"
-      continue
     fi
 
     # tool: the tool owns its cache, fall back to removing folders without it.

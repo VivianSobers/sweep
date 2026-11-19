@@ -138,3 +138,28 @@ teardown() {
   [ "$status" -eq 0 ]
   [ ! -e "$HOME/.gradle/caches" ]
 }
+
+@test "clean: unreadable cache is skipped, not a failure" {
+  make_cache Library/Caches/com.apple.Safari 10
+  chmod 000 "$HOME/Library/Caches/com.apple.Safari"
+  make_cache Library/Developer/Xcode/DerivedData 10
+  run "$SWEEP" clean --all --yes
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skip  Safari (no access)"* ]]
+  [ ! -e "$HOME/Library/Developer/Xcode/DerivedData" ]
+}
+
+@test "clean: all is quiet about categories with nothing to clean" {
+  make_cache Library/Developer/Xcode/DerivedData 10
+  printf '%s\n' '/Google Chrome.app/Contents/MacOS/Google Chrome' > "$STUB_RUNNING_FILE"
+  run "$SWEEP" clean --all --yes
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"skip"* ]]
+  ! grep -q '^docker builder' "$STUB_LOG"
+}
+
+@test "clean: named empty category still says so" {
+  run "$SWEEP" clean slack --yes
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skip  Slack (empty)"* ]]
+}
