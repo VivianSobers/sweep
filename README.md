@@ -1,7 +1,5 @@
 # sweep
 
-[![ci](https://github.com/VivianSobers/sweep/actions/workflows/ci.yml/badge.svg)](https://github.com/VivianSobers/sweep/actions/workflows/ci.yml)
-
 See how much space your macOS app and developer caches use, then clean only the categories you choose.
 
 ## What it looks like
