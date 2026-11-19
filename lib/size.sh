@@ -7,7 +7,7 @@ sweep_size_kb() {
 
   for path in "$@"; do
     if [ -e "$path" ]; then
-      if [ ! -r "$path" ] || [ ! -x "$path" ]; then
+      if [ ! -r "$path" ] || { [ -d "$path" ] && [ ! -x "$path" ]; }; then
         unreadable=1
       else
         path_kb=$(du -sk "$path" 2>/dev/null | awk 'NR == 1 { print $1 + 0 }')

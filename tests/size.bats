@@ -38,3 +38,12 @@ teardown() {
   [ "$(sweep_human 1536)" = "1.5M" ]
   [ "$(sweep_human 14889779)" = "14.2G" ]
 }
+
+@test "size: readable file is not unreadable" {
+  mkdir -p "$HOME/Library/Caches"
+  dd if=/dev/zero of="$HOME/Library/Caches/blob" bs=1024 count=8 2>/dev/null
+  chmod 644 "$HOME/Library/Caches/blob"
+  run sweep_size_kb "$HOME/Library/Caches/blob"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 8 ]
+}
