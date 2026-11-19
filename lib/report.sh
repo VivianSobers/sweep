@@ -57,6 +57,7 @@ sweep_report_add_row() {
     size='no access'
     sort_kb=-1
   else
+    [ "$kb" -gt 0 ] || return 0
     size=$(sweep_human "$kb")
     sort_kb=$kb
   fi

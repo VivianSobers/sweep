@@ -79,3 +79,9 @@ teardown() {
   [[ "$output" =~ Other\ caches\ .*64K ]]
   [[ "$output" != *"no access"* ]]
 }
+
+@test "report: empty cache folders are not listed" {
+  mkdir -p "$HOME/Library/Developer/Xcode/DerivedData"
+  run "$SWEEP"
+  [ "$output" = "Nothing to clean." ]
+}
