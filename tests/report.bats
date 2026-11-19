@@ -85,3 +85,16 @@ teardown() {
   run "$SWEEP"
   [ "$output" = "Nothing to clean." ]
 }
+
+@test "report: running apps sort by size below cleanable rows" {
+  make_cache Library/Caches/Homebrew 4
+  make_cache "Library/Application Support/Slack/Cache" 10
+  make_cache Library/Caches/Google/Chrome 50
+  printf '%s\n%s\n' '/Slack.app/' '/Google Chrome.app/Contents/MacOS/Google Chrome' > "$STUB_RUNNING_FILE"
+  run "$SWEEP"
+  homebrew=$(printf '%s\n' "$output" | grep -n 'Homebrew' | cut -d: -f1)
+  chrome=$(printf '%s\n' "$output" | grep -n '^  Chrome' | cut -d: -f1)
+  slack=$(printf '%s\n' "$output" | grep -n '^  Slack' | cut -d: -f1)
+  [ "$homebrew" -lt "$chrome" ]
+  [ "$chrome" -lt "$slack" ]
+}

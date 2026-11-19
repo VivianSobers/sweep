@@ -50,27 +50,28 @@ sweep_display_path() {
 
 # Appends one row to the caller's report state (rows, total, skipped) for
 # the category in $label/$running. rc is sweep_size_kb's status: 3 means
-# part of it is unreadable. Rows sort by kb; -1 sorts them last.
+# part of it is unreadable. Rows sort by group (0 cleanable, 1 running,
+# 2 no access), then by size.
 sweep_report_add_row() {
-  local location=$1 kb=$2 rc=$3 size sort_kb
+  local location=$1 kb=$2 rc=$3 size group
   if [ "$rc" -eq 3 ]; then
     size='no access'
-    sort_kb=-1
+    group=2
   else
     [ "$kb" -gt 0 ] || return 0
     size=$(sweep_human "$kb")
-    sort_kb=$kb
+    group=0
   fi
   if [ "$running" -eq 1 ]; then
-    sort_kb=-1
+    [ "$group" -eq 2 ] || group=1
     case ", $skipped," in
       *", $label,"*) ;;
       *) skipped="${skipped:+$skipped, }$label" ;;
     esac
-  elif [ "$rc" -eq 0 ]; then
+  elif [ "$group" -eq 0 ]; then
     total=$((total + kb))
   fi
-  rows="$rows$sort_kb|$label|$location|$size
+  rows="$rows$group|$kb|$label|$location|$size
 "
 }
 
@@ -124,8 +125,8 @@ EOF
   line='──────────────────────────────────────────────────────────────────────'
   printf '  %-20s %-44s %s\n' CATEGORY LOCATION SIZE
   printf '  %s\n' "$line"
-  printf '%s' "$rows" | sort -t '|' -k1,1nr | while IFS='|' read -r _ label path kb; do
-    printf '  %-20s %-44s %s\n' "$label" "$path" "$kb"
+  printf '%s' "$rows" | sort -t '|' -k1,1n -k2,2nr | while IFS='|' read -r _ _ label path size; do
+    printf '  %-20s %-44s %s\n' "$label" "$path" "$size"
   done
   printf '  %s\n' "$line"
   printf '  %-65s %s\n' 'Reclaimable' "$(sweep_human "$total")"
