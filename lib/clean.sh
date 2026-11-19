@@ -1,79 +1,52 @@
 #!/usr/bin/env bash
 
+# Paths a category removes, one per line.
 sweep_clean_paths() {
-  local id
-  id=$1
-  if [ "$id" = library ]; then
-    sweep_library_other_paths
-  elif [ "$id" = docker ]; then
-    return 0
-  else
-    sweep_category_field "$id" paths
-  fi
+  case "$1" in
+    library) sweep_library_other_paths ;;
+    docker) ;;
+    *) sweep_category_field "$1" paths ;;
+  esac
 }
 
+# KiB a category currently holds; returns 3 if part of it is unreadable.
 sweep_clean_measure() {
-  local id paths path path_index
-  local -a path_array
-  id=$1
-  if [ "$id" = docker ]; then
-    sweep_category_size_kb "$id"
-    return $?
+  if [ "$1" = docker ]; then
+    sweep_category_size_kb docker
+    return
   fi
-
-  paths=$(sweep_clean_paths "$id") || return 1
-  if [ -z "$paths" ]; then
-    printf '0\n'
-    return 0
-  fi
-
-  path_index=0
-  while IFS= read -r path; do
-    [ -n "$path" ] || continue
-    path_array[path_index]=$path
-    path_index=$((path_index + 1))
-  done <<EOF
-$paths
-EOF
-  sweep_size_kb "${path_array[@]}"
+  sweep_size_kb_lines "$(sweep_clean_paths "$1")"
 }
 
 sweep_clean_tool_present() {
-  local tool_cmd tool_name
-  tool_cmd=$1
-  [ -n "$tool_cmd" ] || return 1
-  tool_name=${tool_cmd%% *}
-  command -v "$tool_name" >/dev/null 2>&1
+  [ -n "$1" ] && command -v "${1%% *}" >/dev/null 2>&1
 }
 
+# Runs a registry tool command. Its stdin is /dev/null so it can never
+# consume input meant for sweep.
 sweep_clean_run_tool() {
-  local tool_cmd
-  local -a tool_args
   local IFS=' '
-  tool_cmd=$1
-  read -r -a tool_args <<< "$tool_cmd"
-  [ -n "${tool_args[0]:-}" ] || return 0
-  "${tool_args[@]}"
+  local -a tool_args
+  read -r -a tool_args <<< "$1"
+  "${tool_args[@]}" < /dev/null
 }
 
-sweep_clean_requested() {
-  local requested_id target
-  target=$1
-  shift
-  for requested_id in "$@"; do
-    if [ "$requested_id" = "$target" ]; then
-      return 0
-    fi
-  done
+# Asks before cleaning. The answer is read from fd 3, the user's stdin, which
+# sweep_clean's caller sets up. EOF or anything but y/yes means no.
+sweep_confirm() {
+  local answer=
+  printf 'Clean %s (%s)? [y/N] ' "$1" "$(sweep_human "$2")"
+  IFS= read -r answer <&3 || answer=
+  [ -t 3 ] || printf '\n'
+  case "$answer" in
+    y|Y|yes|Yes|YES) return 0 ;;
+  esac
   return 1
 }
 
 sweep_clean_remove_paths() {
-  local label path display failed
-  label=$1
-  failed=0
+  local label=$1 path display failed=0
   while IFS= read -r path; do
-    [ -n "$path" ] || continue
     [ -e "$path" ] || [ -L "$path" ] || continue
     display=$(sweep_display_path "$path")
     if ! sweep_is_safe_path "$path"; then
@@ -93,7 +66,6 @@ EOF
 sweep_clean_dry_run_paths() {
   local path display path_kb
   while IFS= read -r path; do
-    [ -n "$path" ] || continue
     [ -e "$path" ] || [ -L "$path" ] || continue
     display=$(sweep_display_path "$path")
     if ! sweep_is_safe_path "$path"; then
@@ -107,6 +79,8 @@ $1
 EOF
 }
 
+# A symlinked cache measures 0 KiB but must still reach the safety gate,
+# so the user sees it refused rather than silently skipped.
 sweep_clean_has_live_symlink() {
   local path
   while IFS= read -r path; do
@@ -119,82 +93,70 @@ EOF
   return 1
 }
 
+sweep_usage_clean() {
+  printf '%s\n' 'Usage: sweep clean [--dry-run] [--yes] (--all | ID...)' >&2
+}
+
+# sweep clean [--dry-run] [--yes] (--all | ID...)
+# Call with the user's stdin on fd 3: sweep_clean "$@" 3<&0
 sweep_clean() {
-  local dry_run yes all_categories requested_count arg usage_error id label proc mode tool_cmd paths before_kb after_kb size_status tool_present answer action_failed tool_status freed total_kb
-  local -a requested
-  exec 3<&0
-  dry_run=0
-  yes=0
-  all_categories=0
-  requested_count=0
-  usage_error=0
+  local dry_run=0 yes=0 all=0 requested='' arg
+  local id label proc mode tool_cmd paths before_kb after_kb rc freed
+  local tool_present do_rm do_tool total_kb=0 failed=0
 
   for arg in "$@"; do
     case "$arg" in
       --dry-run) dry_run=1 ;;
       --yes) yes=1 ;;
-      --all)
-        if [ "$all_categories" -eq 1 ]; then
-          usage_error=1
-        fi
-        all_categories=1
+      --all) all=1 ;;
+      -*)
+        printf 'sweep: unknown option: %s\n' "$arg" >&2
+        sweep_usage_clean
+        return 2
         ;;
       *)
-        requested[requested_count]=$arg
-        requested_count=$((requested_count + 1))
+        if ! sweep_category_field "$arg" label >/dev/null 2>&1; then
+          printf 'sweep: unknown category: %s\n' "$arg" >&2
+          return 2
+        fi
+        requested="$requested $arg "
         ;;
     esac
   done
 
-  if [ "$usage_error" -eq 1 ] || { [ "$all_categories" -eq 1 ] && [ "$requested_count" -gt 0 ]; } || { [ "$all_categories" -eq 0 ] && [ "$requested_count" -eq 0 ]; }; then
-    printf '%s\n' 'Usage: sweep clean [--dry-run] [--yes] (--all | ID...)' >&2
-    exec 3<&-
+  if { [ "$all" -eq 1 ] && [ -n "$requested" ]; } || { [ "$all" -eq 0 ] && [ -z "$requested" ]; }; then
+    sweep_usage_clean
     return 2
   fi
 
-  if [ "$all_categories" -eq 0 ]; then
-    local request_index requested_id
-    request_index=0
-    while [ "$request_index" -lt "$requested_count" ]; do
-      requested_id=${requested[$request_index]}
-      if ! sweep_category_field "$requested_id" label >/dev/null 2>&1; then
-        printf 'sweep: unknown category: %s\n' "$requested_id" >&2
-        exec 3<&-
-        return 2
-      fi
-      request_index=$((request_index + 1))
-    done
-  fi
-
-  total_kb=0
-  failed=0
   while IFS= read -r id; do
-    if [ "$all_categories" -eq 1 ]; then
-      [ "$id" = library ] && continue
-    elif ! sweep_clean_requested "$id" "${requested[@]}"; then
-      continue
+    if [ "$all" -eq 1 ]; then
+      [ "$id" != library ] || continue
+    else
+      case "$requested" in
+        *" $id "*) ;;
+        *) continue ;;
+      esac
     fi
 
-    label=$(sweep_category_field "$id" label) || continue
-    proc=$(sweep_category_field "$id" proc) || proc=
-    mode=$(sweep_category_field "$id" mode) || continue
-    tool_cmd=$(sweep_category_field "$id" tool) || tool_cmd=
-    paths=$(sweep_clean_paths "$id") || paths=
+    label=$(sweep_category_field "$id" label)
+    proc=$(sweep_category_field "$id" proc)
+    mode=$(sweep_category_field "$id" mode)
+    tool_cmd=$(sweep_category_field "$id" tool)
+    paths=$(sweep_clean_paths "$id")
 
     if [ -n "$proc" ] && sweep_is_running "$proc"; then
       printf 'skip  %s (running)\n' "$label"
       continue
     fi
 
-    if before_kb=$(sweep_clean_measure "$id"); then
-      :
-    else
-      size_status=$?
-      if [ "$size_status" -eq 3 ]; then
-        printf 'skip  %s (no access)\n' "$label"
-      else
-        printf 'fail  %s: could not measure cache size\n' "$label"
-      fi
+    before_kb=$(sweep_clean_measure "$id") && rc=0 || rc=$?
+    if [ "$rc" -eq 3 ]; then
+      printf 'skip  %s (no access)\n' "$label"
+      failed=1
+      continue
+    elif [ "$rc" -ne 0 ]; then
+      printf 'fail  %s: could not measure cache size\n' "$label"
       failed=1
       continue
     fi
@@ -203,142 +165,54 @@ sweep_clean() {
     if sweep_clean_tool_present "$tool_cmd"; then
       tool_present=1
     fi
-    if [ "$before_kb" -eq 0 ] && { [ "$mode" != tool ] || [ "$tool_present" -eq 0 ]; }; then
-      if ! sweep_clean_has_live_symlink "$paths"; then
-        printf 'skip  %s (empty)\n' "$label"
-        continue
-      fi
+    if [ "$before_kb" -eq 0 ] && { [ "$mode" != tool ] || [ "$tool_present" -eq 0 ]; } &&
+      ! sweep_clean_has_live_symlink "$paths"; then
+      printf 'skip  %s (empty)\n' "$label"
+      continue
     fi
 
+    # tool: the tool owns its cache, fall back to removing folders without it.
+    # rm+tool: remove folders, then let the tool tidy what folders can't reach.
+    do_rm=0
+    do_tool=0
+    case "$mode" in
+      tool) if [ "$tool_present" -eq 1 ]; then do_tool=1; else do_rm=1; fi ;;
+      rm|scan) do_rm=1 ;;
+      rm+tool) do_rm=1; do_tool=$tool_present ;;
+    esac
+
     if [ "$dry_run" -eq 1 ]; then
-      case "$mode" in
-        tool)
-          if [ "$tool_present" -eq 1 ]; then
-            printf 'would run: %s\n' "$tool_cmd"
-          else
-            sweep_clean_dry_run_paths "$paths"
-          fi
-          ;;
-        rm|scan)
-          sweep_clean_dry_run_paths "$paths"
-          ;;
-        rm+tool)
-          sweep_clean_dry_run_paths "$paths"
-          if [ "$tool_present" -eq 1 ]; then
-            printf 'would run: %s\n' "$tool_cmd"
-          fi
-          ;;
-      esac
+      if [ "$do_rm" -eq 1 ]; then
+        sweep_clean_dry_run_paths "$paths"
+      fi
+      if [ "$do_tool" -eq 1 ]; then
+        printf 'would run: %s\n' "$tool_cmd"
+      fi
       total_kb=$((total_kb + before_kb))
       continue
     fi
 
-    action_failed=0
-    case "$mode" in
-      tool)
-        if [ "$tool_present" -eq 1 ]; then
-          if [ "$yes" -eq 0 ]; then
-            printf 'Clean %s (%s)? [y/N] ' "$label" "$(sweep_human "$before_kb")"
-            if IFS= read -r answer <&3; then
-              :
-            else
-              answer=
-            fi
-            printf '\n'
-            case "$answer" in
-              y|Y|yes) ;;
-              *) printf 'skip  %s (not confirmed)\n' "$label"; continue ;;
-            esac
-          fi
-          if sweep_clean_run_tool "$tool_cmd"; then
-            :
-          else
-            tool_status=$?
-            printf 'fail  %s: %s exited %s\n' "$label" "$tool_cmd" "$tool_status"
-            failed=1
-          fi
-        else
-          if [ "$yes" -eq 0 ]; then
-            printf 'Clean %s (%s)? [y/N] ' "$label" "$(sweep_human "$before_kb")"
-            if IFS= read -r answer; then
-              :
-            else
-              answer=
-            fi
-            printf '\n'
-            case "$answer" in
-              y|Y|yes) ;;
-              *) printf 'skip  %s (not confirmed)\n' "$label"; continue ;;
-            esac
-          fi
-          if ! sweep_clean_remove_paths "$label" "$paths"; then
-            action_failed=1
-          fi
-        fi
-        ;;
-      rm|scan)
-        if [ "$yes" -eq 0 ]; then
-          printf 'Clean %s (%s)? [y/N] ' "$label" "$(sweep_human "$before_kb")"
-          if IFS= read -r answer <&3; then
-            :
-          else
-            answer=
-          fi
-          printf '\n'
-          case "$answer" in
-            y|Y|yes) ;;
-            *) printf 'skip  %s (not confirmed)\n' "$label"; continue ;;
-          esac
-        fi
-        if ! sweep_clean_remove_paths "$label" "$paths"; then
-          action_failed=1
-        fi
-        ;;
-      rm+tool)
-        if [ "$yes" -eq 0 ]; then
-          printf 'Clean %s (%s)? [y/N] ' "$label" "$(sweep_human "$before_kb")"
-          if IFS= read -r answer <&3; then
-            :
-          else
-            answer=
-          fi
-          printf '\n'
-          case "$answer" in
-            y|Y|yes) ;;
-            *) printf 'skip  %s (not confirmed)\n' "$label"; continue ;;
-          esac
-        fi
-        if ! sweep_clean_remove_paths "$label" "$paths"; then
-          action_failed=1
-        fi
-        if [ "$tool_present" -eq 1 ]; then
-          if sweep_clean_run_tool "$tool_cmd"; then
-            :
-          else
-            tool_status=$?
-            printf 'fail  %s: %s exited %s\n' "$label" "$tool_cmd" "$tool_status"
-            failed=1
-          fi
-        fi
-        ;;
-    esac
+    if [ "$yes" -eq 0 ] && ! sweep_confirm "$label" "$before_kb"; then
+      printf 'skip  %s (not confirmed)\n' "$label"
+      continue
+    fi
 
-    if [ "$action_failed" -eq 1 ]; then
+    if [ "$do_rm" -eq 1 ] && ! sweep_clean_remove_paths "$label" "$paths"; then
       failed=1
     fi
-    if after_kb=$(sweep_clean_measure "$id"); then
-      :
-    else
-      size_status=$?
-      after_kb=0
-      if [ "$size_status" -ne 3 ]; then
+    if [ "$do_tool" -eq 1 ]; then
+      sweep_clean_run_tool "$tool_cmd" && rc=0 || rc=$?
+      if [ "$rc" -ne 0 ]; then
+        printf 'fail  %s: %s exited %s\n' "$label" "$tool_cmd" "$rc"
         failed=1
       fi
     fi
+
+    after_kb=$(sweep_clean_measure "$id") || true
+    [ -n "$after_kb" ] || after_kb=$before_kb
+    freed=0
     if [ "$before_kb" -gt "$after_kb" ]; then
       freed=$((before_kb - after_kb))
-    else
-      freed=0
     fi
     total_kb=$((total_kb + freed))
     printf 'done  %s  freed %s\n' "$label" "$(sweep_human "$freed")"
@@ -351,6 +225,5 @@ EOF
   else
     printf 'Freed %s\n' "$(sweep_human "$total_kb")"
   fi
-  exec 3<&-
   return "$failed"
 }

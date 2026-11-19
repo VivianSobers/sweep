@@ -33,6 +33,10 @@ if [ "$name" = pgrep ]; then
   exit 1
 fi
 
+if [ "${STUB_READS_STDIN:-}" = "$name" ]; then
+  cat > /dev/null
+fi
+
 if [ "$name" = id ] && [ "${1:-}" = -u ]; then
   printf '%s\n' "${STUB_UID:-501}"
   exit 0

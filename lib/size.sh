@@ -35,3 +35,14 @@ sweep_human() {
     }
   }'
 }
+
+# Like sweep_size_kb, but takes the paths as one newline-separated string.
+sweep_size_kb_lines() {
+  local IFS='
+' rc
+  set -f
+  # shellcheck disable=SC2086 # split on newlines only, globbing is off
+  sweep_size_kb $1 && rc=0 || rc=$?
+  set +f
+  return "$rc"
+}

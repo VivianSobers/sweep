@@ -118,3 +118,23 @@ teardown() {
   [ "$status" -eq 0 ]
   [ ! -e "$HOME/Library/Caches/com.example.foo" ]
 }
+
+@test "clean: fallback prompt reads the user's answer" {
+  remove_stub npm
+  make_cache .npm/_cacache 10
+  make_cache .gradle/caches 10
+  run bash -c 'printf "y\\ny\\n" | "$@"' sh "$SWEEP" clean npm gradle
+  [ "$status" -eq 0 ]
+  [ ! -e "$HOME/.npm/_cacache" ]
+  [ ! -e "$HOME/.gradle/caches" ]
+}
+
+@test "clean: tools cannot swallow later categories" {
+  STUB_READS_STDIN=brew
+  export STUB_READS_STDIN
+  make_cache Library/Caches/Homebrew 10
+  make_cache .gradle/caches 10
+  run "$SWEEP" clean homebrew gradle --yes
+  [ "$status" -eq 0 ]
+  [ ! -e "$HOME/.gradle/caches" ]
+}
