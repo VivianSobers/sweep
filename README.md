@@ -52,7 +52,7 @@ sweep clean --yes homebrew    # skip confirmation
 
 ## What it cleans
 
-These paths are grouped from `sweep list` in a fixture home. Android Studio's wildcard path is shown as the fixture match; `sweep list` expands it to matching folders on your Mac. Docker is tool-only and has no filesystem path to list.
+`sweep list` prints the same paths, with wildcards expanded to the folders that exist on your Mac. Docker has no folder: its build cache is measured and cleaned through `docker` itself.
 
 | ID | Category | Paths |
 |---|---|---|
@@ -64,7 +64,7 @@ These paths are grouped from `sweep list` in a fixture home. Android Studio's wi
 | `pip` | pip | `~/Library/Caches/pip` |
 | `conda` | conda | `~/miniconda3/pkgs`<br>`~/anaconda3/pkgs`<br>`~/miniforge3/pkgs` |
 | `gradle` | Gradle | `~/.gradle/caches` |
-| `android` | Android Studio | `~/Library/Caches/Google/AndroidStudio-2025.1`<br>`~/.android/cache` |
+| `android` | Android Studio | `~/Library/Caches/Google/AndroidStudio*`<br>`~/.android/cache` |
 | `cocoapods` | CocoaPods | `~/Library/Caches/CocoaPods` |
 | `chrome` | Chrome | `~/Library/Caches/Google/Chrome` |
 | `safari` | Safari | `~/Library/Caches/com.apple.Safari` |
@@ -76,6 +76,7 @@ These paths are grouped from `sweep list` in a fixture home. Android Studio's wi
 | `vscode` | VS Code | `~/Library/Application Support/Code/Cache`<br>`~/Library/Application Support/Code/CachedData`<br>`~/Library/Application Support/Code/CachedExtensionVSIXs` |
 | `teams` | Teams | `~/Library/Containers/com.microsoft.teams2/Data/Library/Caches` |
 | `zoom` | Zoom | `~/Library/Caches/us.zoom.xos` |
+| `docker` | Docker build cache | (via `docker builder prune --force`) |
 | `library` | Other caches | `~/Library/Caches` (direct children not covered above or under Google) |
 
 ## Run tests
