@@ -1,37 +1,33 @@
 #!/usr/bin/env bash
 
+# Every path some named category owns, one per line.
+sweep_registered_paths() {
+  local id
+  while IFS= read -r id; do
+    case "$id" in
+      library|docker) continue ;;
+    esac
+    sweep_category_field "$id" paths
+  done <<EOF
+$(sweep_category_ids)
+EOF
+}
+
+# Direct children of ~/Library/Caches that no named category owns.
 sweep_library_other_paths() {
-  local cache_root child id known category_paths registered
-  cache_root="$HOME/Library/Caches"
+  local cache_root="$HOME/Library/Caches" known child nl='
+'
   [ -d "$cache_root" ] || return 0
+  known="$nl$(sweep_registered_paths)$nl"
 
   for child in "$cache_root"/*; do
     [ -e "$child" ] || [ -L "$child" ] || continue
-    case "$child" in
-      "$cache_root/Google"|"$cache_root/Google/"*) continue ;;
+    case "$known" in
+      *"$nl$child$nl"*) continue ;;
     esac
-
-    known=0
-    while IFS= read -r id; do
-      [ "$id" = library ] && continue
-      [ "$id" = docker ] && continue
-      category_paths=$(sweep_category_field "$id" paths) || continue
-      while IFS= read -r registered; do
-        if [ "$registered" = "$child" ]; then
-          known=1
-          break
-        fi
-      done <<EOF
-$category_paths
-EOF
-      [ "$known" -eq 1 ] && break
-    done <<EOF
-$(sweep_category_ids)
-EOF
-
-    if [ "$known" -eq 0 ]; then
-      printf '%s\n' "$child"
-    fi
+    # Google/ holds Chrome and Android Studio, which have their own rows.
+    [ "$child" != "$cache_root/Google" ] || continue
+    printf '%s\n' "$child"
   done
 }
 
