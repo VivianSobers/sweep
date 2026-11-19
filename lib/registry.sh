@@ -32,12 +32,10 @@ sweep_category_ids() {
 }
 
 sweep_expand_path() {
-  local raw full_path expanded has_glob tilde
+  local raw full_path expanded has_glob
   raw=$1
-  tilde=$(printf '\176')
   case "$raw" in
-    "$tilde/"*) full_path="$HOME/${raw:2}" ;;
-    "$tilde") full_path=$HOME ;;
+    \~/*) full_path="$HOME/${raw:2}" ;;
     *) full_path=$raw ;;
   esac
 
@@ -59,35 +57,40 @@ sweep_expand_path() {
   done
 }
 
+# Prints column N (1-based) of ID's registry row; fails for unknown ids.
+sweep_registry_column() {
+  sweep_registry | awk -F '|' -v id="$1" -v n="$2" \
+    '$1 == id { print $n; found = 1; exit } END { exit !found }'
+}
+
+# sweep_category_field ID label|mode|proc|tool|paths
+# paths prints one expanded path per line.
 sweep_category_field() {
   [ "$#" -eq 2 ] || return 1
-  local id field value paths path remaining
-  id=$1
-  field=$2
-  case "$field" in
-    label|mode|proc|tool|paths) ;;
+  local column value path
+  case "$2" in
+    label) column=2 ;;
+    mode) column=3 ;;
+    proc) column=4 ;;
+    tool) column=5 ;;
+    paths) column=6 ;;
     *) return 1 ;;
   esac
-
-  case "$field" in
-    label) value=$(sweep_registry | awk -F '|' -v id="$id" '$1 == id { print $2; found=1; exit } END { if (!found) exit 1 }') || return 1; printf '%s\n' "$value" ;;
-    mode) value=$(sweep_registry | awk -F '|' -v id="$id" '$1 == id { print $3; found=1; exit } END { if (!found) exit 1 }') || return 1; printf '%s\n' "$value" ;;
-    proc) value=$(sweep_registry | awk -F '|' -v id="$id" '$1 == id { print $4; found=1; exit } END { if (!found) exit 1 }') || return 1; printf '%s\n' "$value" ;;
-    tool) value=$(sweep_registry | awk -F '|' -v id="$id" '$1 == id { print $5; found=1; exit } END { if (!found) exit 1 }') || return 1; printf '%s\n' "$value" ;;
-    paths)
-      paths=$(sweep_registry | awk -F '|' -v id="$id" '$1 == id { print $6; found=1; exit } END { if (!found) exit 1 }') || return 1
-      while [ -n "$paths" ]; do
-        case "$paths" in
-          *';'*) path=${paths%%;*}; remaining=${paths#*;} ;;
-          *) path=$paths; remaining= ;;
-        esac
-        if [ -n "$path" ]; then
-          sweep_expand_path "$path"
-        fi
-        paths=$remaining
-      done
-      ;;
-  esac
+  value=$(sweep_registry_column "$1" "$column") || return 1
+  if [ "$2" != paths ]; then
+    printf '%s\n' "$value"
+    return 0
+  fi
+  while [ -n "$value" ]; do
+    path=${value%%;*}
+    case "$value" in
+      *';'*) value=${value#*;} ;;
+      *) value= ;;
+    esac
+    if [ -n "$path" ]; then
+      sweep_expand_path "$path"
+    fi
+  done
 }
 
 sweep_docker_size_kb() {
